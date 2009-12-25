@@ -1,0 +1,4 @@
+name = Menu trials node reference
+description = [menutrialsnoderef] Adds breadcrumb based on a node reference 
+core = 6.x
+dependancies[] = node_reference;

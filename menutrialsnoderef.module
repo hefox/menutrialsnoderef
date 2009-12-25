@@ -1,0 +1,132 @@
+<?php
+
+/*
+	implementation of hook_nodeapi
+*/
+function menutrialsnoderef_nodeapi(&$node, $op, $teaser = NULL, $page = NULL) {
+  if ($op == 'view' && $page == TRUE) {
+    $breadcrumb = drupal_get_breadcrumb();
+    $c = count($breadcrumb);
+    if ($c < 2 || ($c == 2 && $breadcrumb[1]==drupal_get_title())) {
+      $fields = content_types($node->type);
+      $fields = $fields['fields'];
+      foreach($fields as $k => $field) {
+        if ($field['type']=='nodereference' && ($nid = $node->{$k}[0]['nid'])) {
+          $active_trail = menutrialsnoderef_menu_set_active_trail($nid);
+          $item = menu_get_item('node/'.$nid);
+          $breadcrumb = array();
+          foreach ($active_trail as $parent) {
+            
+            $breadcrumb[] = l($parent['title'], $parent['href'], $parent['localized_options']);
+          }
+          $breadcrumb[] = l($item['title'],$item['href'],$item['localized_options']);
+           if (variable_get('menu_breadcrumb_append_node_title', 0) == 1) {
+            if (variable_get('menu_breadcrumb_append_node_url', 0) == 1) {
+              $breadcrumb[] = l(drupal_get_title(), 'node/'.$node->nid, array('html' => TRUE));
+            }
+            else {
+              $breadcrumb[] = drupal_get_title();
+            }
+          }
+          drupal_set_breadcrumb($breadcrumb);
+          break;
+        }
+      }
+    }
+  }
+}
+ 	
+function menutrialsnoderef_field_settings_alter(&$v, $op, $field) { 
+ 	 if ($field['type']== 'nodereference') {
+   	 switch ($op) {
+     	case 'form': 
+        $v['menutrialsnoderef'] = array(
+          '#type' => 'checkbox',
+          '#title' => t('Use breadcrumb of first referenced node'),
+          '#default_value' => isset($widget['menutrialsnoderef']) ? $widget['menutrialsnoderef'] : 1,
+          '#description' => t('Select this try to use the first referenced node in this field as breadcrumb.'),
+        );
+        
+     	break;
+    }
+  }
+}
+
+function menutrialsnoderef_menu_set_active_trail($nid) {
+  $trail = array();
+  $trail[] = array('title' => t('Home'), 'href' => '<front>', 'localized_options' => array(), 'type' => 0);
+  $item = menu_get_item('node/'.$nid);
+
+  // Check whether the current item is a local task (displayed as a tab).
+  if ($item['tab_parent']) {
+    // The title of a local task is used for the tab, never the page title.
+    // Thus, replace it with the item corresponding to the root path to get
+    // the relevant href and title.  For example, the menu item corresponding
+    // to 'admin' is used when on the 'By module' tab at 'admin/by-module'.
+    $parts = explode('/', $item['tab_root']);
+    $args = arg();
+    // Replace wildcards in the root path using the current path.
+    foreach ($parts as $index => $part) {
+      if ($part == '%') {
+        $parts[$index] = $args[$index];
+      }
+    }
+    // Retrieve the menu item using the root path after wildcard replacement.
+    $root_item = menu_get_item(implode('/', $parts));
+    if ($root_item && $root_item['access']) {
+      $item = $root_item;
+    }
+  }
+  menutrialsnoderef_menu_breadcrumb($nid);
+  $tree = menu_tree_page_data(menu_get_active_menu_name());
+  list($key, $curr) = each($tree);
+
+  while ($curr) {
+    // Terminate the loop when we find the current path in the active trail.
+    if ($curr['link']['href'] == $item['href']) {
+      $curr = FALSE;
+    }
+    else {
+      // Add the link if it's in the active trail, then move to the link below.
+      $trail[] = $curr['link'];
+      $tree = $curr['below'] ? $curr['below'] : array();
+      list($key, $curr) = each($tree);
+    }
+  }
+  return $trail;
+}
+
+function menutrialsnoderef_menu_breadcrumb($nid){
+  if (module_exists('menu_breadcrumb') && variable_get('menu_breadcrumb_determine_menu', 1)) {
+    $menu_item = menu_get_item('node/'.$nid);
+    $result = db_query("SELECT mlid, menu_name FROM {menu_links} WHERE link_path = '%s'", $menu_item['href']);
+    $menu_link_menus = array();
+    while ($menu_link = db_fetch_array($result)) {
+      $menu_link_menus[$menu_link['menu_name']] = TRUE;
+    }
+
+    // Choose the highest-priority 'Enabled' menu.
+    $match_cache = variable_get('menu_breadcrumb_pattern_matches', array());
+    $menu_list = array_filter(menu_breadcrumb_menu_list()); // enabled menus.
+
+    foreach (array_keys($menu_list) as $menu_name) {
+      $is_pattern = (substr($menu_name, 0, 1) == '/' && substr($menu_name, -1, 1) == '/');
+      if ($is_pattern) {
+        // Look for each of the $menu_link_menus in the pattern match cache.
+        foreach (array_keys($menu_link_menus) as $menu_link_menu_name) {
+          if (array_key_exists($menu_link_menu_name, $match_cache)
+              && $match_cache[$menu_link_menu_name] == $menu_name) {
+            menu_set_active_menu_name($menu_link_menu_name);
+            break 2;
+          }
+        }
+      }
+      else {
+        if (array_key_exists($menu_name, $menu_link_menus)) {
+          menu_set_active_menu_name($menu_name);
+          break;
+        }
+      }
+    }
+  }
+}
